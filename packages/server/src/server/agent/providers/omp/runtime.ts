@@ -20,6 +20,7 @@ export interface OmpRuntimeLaunch {
   env?: Record<string, string>;
   protocolMode?: "rpc" | "rpc-ui";
   model?: string;
+  agent?: string;
   thinkingOptionId?: string;
   modeId?: string;
   session?: string;
@@ -33,6 +34,7 @@ export interface OmpStartSessionInput {
   env?: Record<string, string>;
   protocolMode?: "rpc" | "rpc-ui";
   model?: string;
+  agent?: string;
   thinkingOptionId?: string;
   modeId?: string;
   session?: string;
@@ -108,6 +110,7 @@ export function buildOmpLaunch(input: {
           }
         : undefined,
     model: input.session.model,
+    agent: input.session.agent,
     thinkingOptionId: input.session.thinkingOptionId,
     protocolMode,
     modeId: input.session.modeId,
@@ -132,6 +135,9 @@ function appendOmpLaunchArgs(
   }
   if (session.model) {
     argv.push("--model", session.model);
+  }
+  if (session.agent) {
+    argv.push("--agent", session.agent);
   }
   if (session.thinkingOptionId) {
     argv.push("--thinking", session.thinkingOptionId);

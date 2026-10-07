@@ -4,6 +4,8 @@ import { setImmediate as waitForImmediate } from "node:timers/promises";
 import type { PaseoToolCatalog } from "../../tools/types.js";
 import type { OmpNoTurnScheduler, OmpProviderIdleScheduler } from "./agent.js";
 import type { OmpUsagePollScheduler } from "./usage-poller.js";
+import { validateProviderOptions } from "../../provider-options.js";
+import { OmpProviderOptionsSchema } from "./options.js";
 import { OmpHarness } from "./test-utils/omp-harness.js";
 
 class ManualIdleScheduler implements OmpProviderIdleScheduler {
@@ -158,6 +160,76 @@ describe("OMP agent client and session", () => {
       "--thinking",
       "xhigh",
     ]);
+  });
+
+  test("launches with --agent when provider options select an agent", async () => {
+    const omp = new OmpHarness();
+    await omp.start({ modeId: "ask", providerOptions: { agent: "implementer" } });
+
+    expect(omp.launchConfiguration().argv).toEqual([
+      "omp",
+      "--mode",
+      "rpc-ui",
+      "--approval-mode",
+      "always-ask",
+      "--agent",
+      "implementer",
+    ]);
+  });
+
+  test("keeps the agent selection separate from the model selection", async () => {
+    const omp = new OmpHarness();
+    await omp.start({
+      modeId: "ask",
+      model: "anthropic/claude-opus-5",
+      providerOptions: { agent: "implementer" },
+    });
+
+    expect(omp.launchConfiguration().argv).toEqual([
+      "omp",
+      "--mode",
+      "rpc-ui",
+      "--approval-mode",
+      "always-ask",
+      "--model",
+      "anthropic/claude-opus-5",
+      "--agent",
+      "implementer",
+    ]);
+  });
+
+  test("omits --agent when provider options select no agent", async () => {
+    const omp = new OmpHarness();
+    await omp.start({ modeId: "ask", model: "anthropic/claude-opus-5" });
+
+    expect(omp.launchConfiguration().argv).not.toContain("--agent");
+  });
+
+  test("resumes with the stored agent selection", async () => {
+    const omp = new OmpHarness();
+    await omp.resume(
+      {
+        user: { id: "user-history", text: "continue the audit" },
+        assistant: { id: "assistant-history", text: "audit context restored" },
+      },
+      { modeId: "ask", providerOptions: { agent: "implementer" } },
+    );
+
+    expect(omp.launchConfiguration().argv).toEqual(
+      expect.arrayContaining(["--agent", "implementer"]),
+    );
+  });
+
+  test("accepts an agent name and rejects other provider option shapes", () => {
+    expect(
+      validateProviderOptions("omp", OmpProviderOptionsSchema, { agent: "implementer" }),
+    ).toEqual({ agent: "implementer" });
+    expect(() => validateProviderOptions("omp", OmpProviderOptionsSchema, { agent: "  " })).toThrow(
+      "providerOptions.agent",
+    );
+    expect(() =>
+      validateProviderOptions("omp", OmpProviderOptionsSchema, { model: "anthropic/opus" }),
+    ).toThrow("Invalid providerOptions for 'omp'");
   });
 
   test("streams a prompt through completion", async () => {

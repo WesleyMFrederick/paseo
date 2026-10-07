@@ -3296,6 +3296,57 @@ describe("create_agent MCP tool", () => {
     );
   });
 
+  it("passes settings.agent through provider options without dropping inherited options", async () => {
+    const { agentManager, agentStorage, spies } = createTestDeps();
+    const parentAgent = {
+      id: "parent-agent",
+      cwd: existingCwd,
+      workspaceId: "wks_parent",
+      provider: "omp",
+      currentModeId: null,
+      config: {
+        providerOptions: { sandbox_mode: "workspace-write" },
+      },
+    } as ManagedAgent;
+    spies.agentManager.getAgent.mockReturnValue(parentAgent);
+    spies.agentManager.createAgent.mockResolvedValue({
+      id: "child-agent",
+      cwd: existingCwd,
+      lifecycle: "idle",
+      currentModeId: null,
+      availableModes: [],
+      config: { title: "Child" },
+    } as ManagedAgent);
+    const server = await createAgentMcpServer({
+      agentManager,
+      agentStorage,
+      providerSnapshotManager: createOpenCodeManager().manager,
+      callerAgentId: "parent-agent",
+      logger,
+    });
+
+    await registeredTool(server, "create_agent").handler({
+      ...subagentCurrentWorkspace(),
+      title: "Scout child",
+      provider: "omp/gpt-5.4",
+      initialPrompt: "Do work",
+      settings: { agent: "scout" },
+    });
+
+    // The agent definition name is provider-native state (it belongs to the
+    // provider contract), and must not displace the model choice or the
+    // caller's other provider options.
+    expect(spies.agentManager.createAgent).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        provider: "omp",
+        model: "gpt-5.4",
+        providerOptions: { sandbox_mode: "workspace-write", agent: "scout" },
+      }),
+      undefined,
+      expect.any(Object),
+    );
+  });
+
   it("inherits the parent's workspaceId when an MCP child is created in the parent's working tree", async () => {
     const workdir = await mkdtemp(join(tmpdir(), "mcp-workspace-inherit-"));
     const storage = new AgentStorage(join(workdir, "agents"), logger);

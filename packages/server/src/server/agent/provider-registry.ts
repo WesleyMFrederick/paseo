@@ -49,6 +49,7 @@ import { MockSlowProviderClient } from "./providers/mock-slow-provider.js";
 import { ClaudeProviderOptionsSchema } from "./providers/claude/options.js";
 import { CodexProviderOptionsSchema } from "./providers/codex/options.js";
 import { OpenCodeProviderOptionsSchema } from "./providers/opencode/options.js";
+import { OmpProviderOptionsSchema } from "./providers/omp/options.js";
 import { ToolPolicyUnsupportedError, validateProviderOptions } from "./provider-options.js";
 import {
   AGENT_PROVIDER_DEFINITIONS,
@@ -147,6 +148,7 @@ const PROVIDER_CONTRACTS: Record<string, ProviderContract> = {
   claude: { optionsSchema: ClaudeProviderOptionsSchema, supportsExactMcpPreapproval: true },
   codex: { optionsSchema: CodexProviderOptionsSchema, supportsExactMcpPreapproval: true },
   opencode: { optionsSchema: OpenCodeProviderOptionsSchema, supportsExactMcpPreapproval: true },
+  omp: { optionsSchema: OmpProviderOptionsSchema, supportsExactMcpPreapproval: false },
 };
 
 const UNSUPPORTED_PROVIDER_CONTRACT: ProviderContract = {

@@ -32,10 +32,35 @@ This Paseo version accepts these keys:
   `repo_clone`, `repo_overview`, `lsp`, `doom_loop`, and `skill`. See the
   [OpenCode permissions reference](https://opencode.ai/docs/permissions/). OpenCode permissions are
   application policy, not an OS sandbox.
+- **OMP:** `agent`, the name of an OMP task-agent definition. OMP owns the definition, so Paseo
+  sends only the name. The agent picks the role (instructions, tools, defaults); Paseo's model
+  selection still picks the model separately. An unknown or disabled name fails before the session
+  starts.
 
 Each provider definition owns its option schema and exact MCP preapproval mapping. A new provider
 must fail closed for Hub unattended execution until it can approve one exact injected MCP server
 and tool identity without approving native tools.
+
+### Selecting an OMP agent
+
+Pass the agent name on the command line:
+
+```bash
+paseo run --provider omp --model gpt-5.4 --agent scout "Map the auth flow"
+```
+
+Or pass it as a provider option through the SDK:
+
+```ts
+await client.agents.create({
+  config: {
+    provider: "omp/gpt-5.4",
+    options: { agent: "scout" },
+  },
+  cwd: "/repo",
+  prompt: "Map the auth flow",
+});
+```
 
 ## Two Integration Patterns
 

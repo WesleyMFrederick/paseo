@@ -646,6 +646,20 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
     return { providerOptions: callerAgent.config.providerOptions };
   };
 
+  // `settings.agent` names a provider-owned task-agent definition. It must be
+  // merged with inherited options from the caller, not replace them, because it
+  // travels as a provider-native option.
+  const resolveCreateAgentProviderConfig = (
+    selectedProvider: string,
+    requestedAgent: string | undefined,
+  ): Pick<AgentSessionConfig, "providerOptions"> | undefined => {
+    const inherited = resolveInheritedProviderConfig(selectedProvider);
+    if (!requestedAgent) {
+      return inherited;
+    }
+    return { providerOptions: { ...inherited?.providerOptions, agent: requestedAgent } };
+  };
+
   const resolveScopedCwd = (requestedCwd?: string, opts?: { required?: boolean }): string => {
     const callerAgent = resolveCallerAgent();
     if (callerAgent) {
@@ -846,6 +860,14 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
     .object({
       modeId: z.string().optional().describe("Session mode to configure before the first run."),
       thinkingOptionId: z.string().optional().describe("Thinking option ID."),
+      agent: z
+        .string()
+        .trim()
+        .min(1, "settings.agent cannot be empty")
+        .optional()
+        .describe(
+          "OMP task-agent definition name, for example scout. Separate from the model choice.",
+        ),
       features: z
         .record(z.string(), z.unknown())
         .optional()
@@ -1430,7 +1452,10 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
         notifyOnFinish = resolvedArgs.parsedArgs.notifyOnFinish ?? false;
       }
       const selectedProvider = resolveRequiredProviderModel(parsedArgs.provider).provider;
-      const inheritedConfig = resolveInheritedProviderConfig(selectedProvider);
+      const providerConfig = resolveCreateAgentProviderConfig(
+        selectedProvider,
+        parsedArgs.settings?.agent,
+      );
       const {
         snapshot,
         background: createdInBackground,
@@ -1454,7 +1479,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
           provider: parsedArgs.provider,
           title: parsedArgs.title,
           initialPrompt: parsedArgs.initialPrompt,
-          config: inheritedConfig,
+          config: providerConfig,
           cwd: resolvedArgs.cwd,
           workspaceId: resolvedArgs.workspaceId,
           thinking: parsedArgs.settings?.thinkingOptionId,

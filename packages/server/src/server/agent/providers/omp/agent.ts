@@ -64,6 +64,7 @@ import {
   type OmpRuntimeProviderParams,
 } from "./provider-config.js";
 export { formatOmpVersionSupport, resolveOmpDiagnosticPaths } from "./provider-config.js";
+import { readOmpAgentOption } from "./options.js";
 import { OmpSubagentCardTracker, type OmpSubagentCardScheduler } from "./subagent-card-tracker.js";
 import { shouldDisplayOmpCustomMessage } from "./custom-message.js";
 import { getUserMessageText } from "./message-history.js";
@@ -439,6 +440,7 @@ function buildResumeStartInput(input: {
     env: input.launchContext?.env,
     session: input.sessionFile,
     model: input.resumeConfig.model,
+    agent: readOmpAgentOption(input.resumeConfig.config.providerOptions),
     thinkingOptionId: normalizeOmpThinkingOption(input.resumeConfig.thinkingOptionId) ?? undefined,
     ...(input.launchMode.modeId ? { modeId: input.launchMode.modeId } : {}),
     ...(input.launchMode.extraArgs ? { extraArgs: input.launchMode.extraArgs } : {}),
@@ -2234,6 +2236,7 @@ export class OmpAgentClient implements AgentClient {
       cwd: config.cwd,
       protocolMode: "rpc-ui",
       model: config.model,
+      agent: readOmpAgentOption(config.providerOptions),
       thinkingOptionId: normalizeOmpThinkingOption(config.thinkingOptionId) ?? undefined,
       noSession: config.internal === true,
       modeId: launchMode.modeId,

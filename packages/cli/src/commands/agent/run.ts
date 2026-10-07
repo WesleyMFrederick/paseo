@@ -39,6 +39,7 @@ export function addRunOptions(cmd: Command): Command {
       )
       .option("--thinking <id>", "Thinking option ID to use for this run")
       .option("--mode <mode>", "Provider-specific mode (e.g., plan, default, bypass)")
+      .option("--agent <name>", "OMP task-agent definition name (separate from --model)")
       .option("--new-workspace <local|worktree>", "Create a separate local or worktree workspace")
       .addOption(new Option("--worktree <name>", "Legacy workspace isolation alias").hideHelp())
       .option(
@@ -115,6 +116,7 @@ export interface AgentRunOptions extends CommandOptions {
   model?: string;
   thinking?: string;
   mode?: string;
+  agent?: string;
   newWorkspace?: string;
   worktree?: string;
   worktreeMode?: string;
@@ -135,6 +137,28 @@ export interface AgentRunOptions extends CommandOptions {
 
 function resolveNewWorkspaceKind(options: AgentRunOptions): string | undefined {
   return options.newWorkspace ?? (options.worktree ? "worktree" : undefined);
+}
+
+// `--agent` names an OMP task-agent definition. Paseo sends only the name as a
+// provider-native option, because OMP owns the definition and validates the
+// name. Agent selection stays separate from `--model`.
+export function resolveRunProviderOptions(
+  options: Pick<AgentRunOptions, "agent">,
+): { agent: string } | undefined {
+  if (options.agent === undefined) {
+    return undefined;
+  }
+
+  const agent = options.agent.trim();
+  if (!agent) {
+    throw {
+      code: "INVALID_AGENT_OPTION",
+      message: "--agent cannot be empty",
+      details: "Provide a task-agent definition name, for example --agent scout",
+    } satisfies CommandError;
+  }
+
+  return { agent };
 }
 
 function buildRunWorkspaceSource(options: AgentRunOptions, cwd: string) {
@@ -594,6 +618,7 @@ export async function runRunCommand(
 
   const resolvedProviderModel = resolveProviderAndModel(options);
   const resolvedTitle = options.title ?? options.name;
+  const providerOptions = resolveRunProviderOptions(options);
 
   const client = await connectToDaemonOrThrow(options.host, host);
 
@@ -641,6 +666,7 @@ export async function runRunCommand(
             images,
             env: requestEnv,
             labels: Object.keys(labels).length > 0 ? labels : undefined,
+            ...(providerOptions ? { providerOptions } : {}),
           });
         } else {
           await client.sendMessage(structuredAgent.id, structuredPrompt);
@@ -711,6 +737,7 @@ export async function runRunCommand(
       images,
       env: requestEnv,
       labels: Object.keys(labels).length > 0 ? labels : undefined,
+      ...(providerOptions ? { providerOptions } : {}),
     });
 
     // Default run behavior is foreground: wait for completion unless background execution is set.
