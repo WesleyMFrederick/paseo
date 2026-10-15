@@ -1,4 +1,4 @@
-import { describe, expect, onTestFinished, test } from "vitest";
+import { describe, expect, onTestFinished, test, vi } from "vitest";
 import { setImmediate as waitForImmediate } from "node:timers/promises";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -137,6 +137,10 @@ class ManualIdleScheduler implements OmpProviderIdleScheduler {
     const resolve = this.retries.shift();
     if (!resolve) throw new Error("OMP has not requested an idle-state retry");
     resolve();
+  }
+
+  retryPending(): void {
+    for (const resolve of this.retries.splice(0)) resolve();
   }
 }
 
@@ -435,6 +439,180 @@ describe("OMP agent client and session", () => {
     omp.reportProviderState({ isStreaming: false, isCompacting: false });
     scheduler.retry();
     await expect(completion).resolves.toMatchObject({ finalText: "first done" });
+  });
+
+  async function startRun() {
+    const runtime = new FakeOmp();
+    const scheduler = new ManualIdleScheduler();
+    const client = new OmpAgentClient({
+      logger: createTestLogger(),
+      runtime,
+      providerIdleScheduler: scheduler,
+    });
+    const session = await client.createSession({
+      provider: "omp",
+      cwd: "/tmp/paseo-omp-agent-test",
+    });
+    onTestFinished(() => session.close());
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    const provider = runtime.latestSession();
+    const prompted = provider.nextPrompt();
+    let settled = false;
+    // Observe rejection immediately so an erroneous early failure is an assertion,
+    // not an unhandled rejection before the continuation finishes.
+    const completion = session.run("finish the dependent work").then(
+      (result) => {
+        settled = true;
+        return { status: "completed" as const, result };
+      },
+      (error: Error) => {
+        settled = true;
+        return { status: "failed" as const, error: error.message };
+      },
+    );
+    await prompted;
+    provider.beginTurn();
+    return { provider, scheduler, events, completion, isSettled: () => settled };
+  }
+
+  test("terminal completion ownership: given a real terminal error, when OMP becomes idle, then the owned request fails with that error", async () => {
+    // Given a foreground request whose authoritative response failed.
+    const { provider, events, completion } = await startRun();
+    const failure: OmpAgentMessage = {
+      role: "assistant",
+      content: [],
+      stopReason: "error",
+      errorMessage: "Native provider failed",
+    };
+
+    // When the terminal end arrives and the provider reports idle.
+    provider.emit({ type: "message_end", message: failure });
+    provider.emit({ type: "agent_end", isTerminal: true, messages: [failure] });
+
+    // Then a genuine failure is preserved, not hidden by error suppression.
+    await expect(completion).resolves.toEqual({
+      status: "failed",
+      error: expect.stringContaining("Native provider failed"),
+    });
+    expect(events.filter((event) => isTurnLifecycle(event.type))).toEqual([
+      expect.objectContaining({ type: "turn_started" }),
+      expect.objectContaining({
+        type: "turn_failed",
+        error: expect.stringContaining("Native provider failed"),
+      }),
+    ]);
+  });
+
+  test("terminal completion ownership: given a nonterminal error, when continuation succeeds, then only the successful terminal result completes the owned request", async () => {
+    // Given an internal error end while a continuation is still owed.
+    const { provider, events, completion, isSettled } = await startRun();
+    const internalError: OmpAgentMessage = {
+      role: "assistant",
+      content: [],
+      stopReason: "error",
+      errorMessage: "Native in-flight message rejected",
+    };
+    provider.emit({ type: "message_end", message: internalError });
+    provider.emit({ type: "agent_end", isTerminal: false, messages: [internalError] });
+
+    // When OMP is briefly idle before beginning the queued continuation.
+    await waitForImmediate();
+    expect.soft(isSettled()).toBe(false);
+    expect
+      .soft(events.filter((event) => isTurnLifecycle(event.type)))
+      .toEqual([expect.objectContaining({ type: "turn_started" })]);
+    provider.state = { ...provider.state, isStreaming: true };
+    provider.emit({ type: "agent_start" });
+    provider.streamAssistantText("Dependent output verified", "continued-assistant");
+    const success: OmpAgentMessage = {
+      role: "assistant",
+      responseId: "continued-assistant",
+      content: [{ type: "text", text: "Dependent output verified" }],
+      stopReason: "stop",
+    };
+    provider.emit({ type: "message_end", message: success });
+    provider.state = { ...provider.state, isStreaming: false };
+    provider.emit({ type: "agent_end", isTerminal: true, messages: [success] });
+
+    // Then no intermediate failure or completion escaped, and the caller gets
+    // the actual successful continuation text exactly once.
+    await expect(completion).resolves.toMatchObject({
+      status: "completed",
+      result: { finalText: "Dependent output verified" },
+    });
+    expect(events.filter((event) => isTurnLifecycle(event.type))).toEqual([
+      expect.objectContaining({ type: "turn_started" }),
+      expect.objectContaining({ type: "turn_completed" }),
+    ]);
+    expect(
+      events.flatMap((event) =>
+        event.type === "timeline" && event.item.type === "assistant_message"
+          ? [event.item.text]
+          : [],
+      ),
+    ).toEqual(["Dependent output verified"]);
+  });
+
+  test("terminal completion ownership: given an obsolete idle waiter, when its reply arrives after the newer candidate's busy reply, then it cannot fail or complete the current request", async () => {
+    // Given an old terminal candidate with its idle request still in flight.
+    const { provider, scheduler, events, completion, isSettled } = await startRun();
+    const releaseOldState = provider.holdStateRequests();
+    onTestFinished(releaseOldState);
+    const oldCheck = provider.getStateRequestCount + 1;
+    provider.emit({
+      type: "agent_end",
+      isTerminal: true,
+      messages: [
+        {
+          role: "assistant",
+          content: [],
+          stopReason: "error",
+          errorMessage: "Obsolete candidate failed",
+        },
+      ],
+    });
+    await provider.waitForStateRequests(oldCheck);
+
+    // When a continuation supersedes it and the newer idle check returns busy.
+    provider.state = { ...provider.state, isStreaming: true };
+    provider.emit({ type: "agent_start" });
+    provider.streamAssistantText("Current output verified", "current-assistant");
+    const success: OmpAgentMessage = {
+      role: "assistant",
+      responseId: "current-assistant",
+      content: [{ type: "text", text: "Current output verified" }],
+      stopReason: "stop",
+    };
+    provider.emit({ type: "message_end", message: success });
+    const releaseNewState = provider.holdStateRequests();
+    onTestFinished(releaseNewState);
+    const newCheck = provider.getStateRequestCount + 1;
+    provider.emit({ type: "agent_end", isTerminal: true, messages: [success] });
+    await provider.waitForStateRequests(newCheck);
+    releaseNewState();
+    await scheduler.waitForWaits(1);
+
+    // The old reply arrives after that busy reply, now observing provider idle.
+    provider.state = { ...provider.state, isStreaming: false };
+    releaseOldState();
+    await waitForImmediate();
+
+    // Then the obsolete payload cannot own completion, even under the same
+    // foreground request. Only the current candidate's idle retry may finish it.
+    expect.soft(isSettled()).toBe(false);
+    expect
+      .soft(events.filter((event) => isTurnLifecycle(event.type)))
+      .toEqual([expect.objectContaining({ type: "turn_started" })]);
+    scheduler.retry();
+    await expect(completion).resolves.toMatchObject({
+      status: "completed",
+      result: { finalText: "Current output verified" },
+    });
+    expect(events.filter((event) => isTurnLifecycle(event.type))).toEqual([
+      expect.objectContaining({ type: "turn_started" }),
+      expect.objectContaining({ type: "turn_completed" }),
+    ]);
   });
 
   test("stays active when OMP state checks fail", async () => {
@@ -1443,6 +1621,60 @@ describe("OMP agent client and session", () => {
     await waitForImmediate();
 
     expect(omp.eventTypes().filter(isTurnLifecycle)).toEqual(["turn_started", "turn_canceled"]);
+  });
+
+  test("given an autonomous turn awaiting idle, when process exit rejects the held state request, then no second terminal outcome follows", async () => {
+    // Given an autonomous turn with a terminal candidate and an in-flight idle check.
+    const scheduler = new ManualIdleScheduler();
+    const runtime = new FakeOmp();
+    const client = new OmpAgentClient({
+      logger: createTestLogger(),
+      runtime,
+      providerIdleScheduler: scheduler,
+      providerIdleDeadlineMs: 1_000,
+    });
+    const session = await client.createSession({
+      provider: "omp",
+      cwd: "/tmp/paseo-omp-agent-test",
+    });
+    onTestFinished(() => session.close());
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    const provider = runtime.latestSession();
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    onTestFinished(() => clock.mockRestore());
+    provider.emit({ type: "agent_start" });
+    provider.beginTurn();
+    const releaseState = provider.holdStateRequests();
+    onTestFinished(releaseState);
+    const nextStateCheck = provider.getStateRequestCount + 1;
+    provider.finishTurn({
+      role: "assistant",
+      content: [{ type: "text", text: "autonomous work finished" }],
+      stopReason: "stop",
+    });
+    await provider.waitForStateRequests(nextStateCheck);
+
+    // When the process exits, the real transport emits process_exit before
+    // rejecting pending RPCs. A dead process cannot return a successful idle reply.
+    const failure = "OMP RPC process exited with code 137 and signal null\nOOM";
+    provider.getStateError = new Error(failure);
+    provider.emit({ type: "process_exit", error: failure });
+    const expectedLifecycle = [
+      expect.objectContaining({ type: "turn_started" }),
+      expect.objectContaining({ type: "turn_failed", error: failure }),
+    ];
+    expect(events.filter((event) => isTurnLifecycle(event.type))).toEqual(expectedLifecycle);
+    releaseState();
+    await waitForImmediate();
+
+    // Then even a late retry past the idle deadline cannot terminalize it again.
+    // Drain only pending retries so this also works when the fixed gate exits early.
+    clock.mockReturnValue(now + 1_001);
+    scheduler.retryPending();
+    await waitForImmediate();
+    expect(events.filter((event) => isTurnLifecycle(event.type))).toEqual(expectedLifecycle);
   });
 
   test("a resumed session does not re-emit replayed events as live timeline items", async () => {

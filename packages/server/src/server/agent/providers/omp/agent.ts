@@ -704,6 +704,7 @@ export class OmpAgentSession implements AgentSession {
     [];
   private activeAssistantMessageId: string | null = null;
   private activeTurnTerminalAssistantMessage: OmpAgentMessage | null = null;
+  private terminalCandidateGeneration = 0;
   private activeTurnStarted = false;
   private activeTurnHasUserMessage = false;
   private activeNoTurnPromptText: string | null = null;
@@ -1188,6 +1189,7 @@ export class OmpAgentSession implements AgentSession {
   }
 
   private resetActiveTurn({ terminalizeWork }: { terminalizeWork: boolean }): void {
+    this.terminalCandidateGeneration++;
     if (terminalizeWork) this.terminalizeActiveWork();
     this.activeTurnId = null;
     this.activeAssistantMessageId = null;
@@ -1781,7 +1783,7 @@ export class OmpAgentSession implements AgentSession {
     void this.hostTools?.close();
     this.usagePoller.stopTurn();
     if (!this.activeTurnId) {
-      this.terminalizeActiveWork();
+      this.resetActiveTurn({ terminalizeWork: true });
       this.subagentIndex.clear(this.runtimeSession);
       this.emit({ type: "turn_failed", provider: this.provider, error });
       return;
@@ -1802,6 +1804,7 @@ export class OmpAgentSession implements AgentSession {
 
     switch (event.type) {
       case "agent_start":
+        this.terminalCandidateGeneration++;
         this.activeTurnStarted = true;
         this.clearNoTurnBuffers();
         this.emit({
@@ -1811,6 +1814,7 @@ export class OmpAgentSession implements AgentSession {
         });
         return;
       case "turn_start":
+        this.terminalCandidateGeneration++;
         this.activeTurnStarted = true;
         this.clearNoTurnBuffers();
         this.emit({
@@ -1872,25 +1876,9 @@ export class OmpAgentSession implements AgentSession {
           },
         });
         return;
-      case "agent_end": {
-        const messages = event.messages ?? [];
-        let terminalMessages: OmpAgentMessage[] | null = null;
-        if (messages.some((message) => message.role === "assistant")) {
-          terminalMessages = messages;
-        } else if (this.activeTurnTerminalAssistantMessage) {
-          terminalMessages = [this.activeTurnTerminalAssistantMessage];
-        }
-        // OMP can end an internal extension-notice cycle before it starts the
-        // model turn for the same prompt. Ignore only cycles where neither the
-        // terminal payload nor the live stream contained an assistant message.
-        if (!terminalMessages) {
-          return;
-        }
-        // A state request is processed after OMP's RPC loop becomes promptable,
-        // so do not advertise Paseo idle until it reports that transition.
-        void this.completeTurnAfterProviderIdle(turnId, terminalMessages);
+      case "agent_end":
+        void this.completeTurnAfterProviderIdle(turnId, event);
         return;
-      }
       default:
         return;
     }
@@ -2183,10 +2171,33 @@ export class OmpAgentSession implements AgentSession {
 
   private async completeTurnAfterProviderIdle(
     turnId: string | undefined,
-    messages: OmpAgentMessage[],
+    event: Extract<OmpAgentSessionEvent, { type: "agent_end" }>,
   ): Promise<void> {
+    this.terminalCandidateGeneration++;
+    if (event.isTerminal === false) {
+      return;
+    }
+    const messages = event.messages ?? [];
+    let terminalMessages: OmpAgentMessage[] | null = null;
+    if (messages.some((message) => message.role === "assistant")) {
+      terminalMessages = messages;
+    } else if (this.activeTurnTerminalAssistantMessage) {
+      terminalMessages = [this.activeTurnTerminalAssistantMessage];
+    }
+    // Legacy empty ends can recover the terminal assistant from the live stream.
+    // Notice-only cycles without an assistant do not own completion.
+    if (!terminalMessages) {
+      return;
+    }
+    // OMP must report promptable before Paseo advertises idle.
+    const generation = this.terminalCandidateGeneration;
     const deadline = Date.now() + this.providerIdleDeadlineMs;
-    while (!this.closed && this.activeTurnStarted && this.currentTurnIdForEvent() === turnId) {
+    while (
+      !this.closed &&
+      this.activeTurnStarted &&
+      this.currentTurnIdForEvent() === turnId &&
+      this.terminalCandidateGeneration === generation
+    ) {
       if (Date.now() >= deadline) {
         this.usagePoller.stopTurn();
         this.resetActiveTurn({ terminalizeWork: true });
@@ -2200,17 +2211,25 @@ export class OmpAgentSession implements AgentSession {
       }
       try {
         const state = await this.runtimeSession.getState();
-        this.state = state;
-        if (this.closed || !this.activeTurnStarted || this.currentTurnIdForEvent() !== turnId) {
-          // An interrupt settled this turn while the state check was in flight.
+        if (
+          this.closed ||
+          !this.activeTurnStarted ||
+          this.currentTurnIdForEvent() !== turnId ||
+          this.terminalCandidateGeneration !== generation
+        ) {
+          // A continuation, newer end, or interrupt superseded this idle check.
           return;
         }
+        this.state = state;
         if (!state.isStreaming && !state.isCompacting) {
-          this.completeTurn(turnId, messages);
+          this.completeTurn(turnId, terminalMessages);
           return;
         }
       } catch (error) {
         this.logger.debug({ err: error }, "OMP state unavailable while waiting for provider idle");
+      }
+      if (this.terminalCandidateGeneration !== generation) {
+        return;
       }
       await this.providerIdleScheduler.waitForRetry();
     }
