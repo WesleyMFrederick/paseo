@@ -22,6 +22,7 @@ import { buildAgentPrompt } from "../prompt-attachments.js";
 import { normalizeClientMessageId, resolveClientMessageId } from "../../client-message-id.js";
 import { resolveRequiredProviderModel, type ResolvedProviderModel } from "../mcp-shared.js";
 import { resolveCreateAgentIntent } from "./intent.js";
+import { PaseoToolInputError } from "../tools/types.js";
 
 export interface CreateAgentCommandDependencies {
   finishSubscriptions?: FinishSubscriptions;
@@ -467,7 +468,7 @@ function requireParentAgent(agentManager: AgentManager, parentAgentId: string): 
   return parentAgent;
 }
 
-function resolveChildAgentCwd(params: {
+export function resolveChildAgentCwd(params: {
   parentCwd: string;
   requestedCwd?: string;
   lockedCwd?: string;
@@ -479,11 +480,17 @@ function resolveChildAgentCwd(params: {
   }
 
   const requestedCwd = params.requestedCwd?.trim();
-  if (!requestedCwd || !params.allowCustomCwd) {
+  if (!requestedCwd) {
     return params.parentCwd;
   }
 
-  return resolvePathFromBase(params.parentCwd, requestedCwd);
+  const resolved = resolvePathFromBase(params.parentCwd, requestedCwd);
+  if (!params.allowCustomCwd && resolved !== params.parentCwd) {
+    throw new PaseoToolInputError(
+      `cwd ${resolved} is not allowed for this caller; its children start in ${params.parentCwd}`,
+    );
+  }
+  return resolved;
 }
 
 interface CreateMcpWorktreeOptions {

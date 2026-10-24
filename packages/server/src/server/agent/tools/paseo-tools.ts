@@ -40,11 +40,11 @@ import {
   requireActiveWorkspaceForArchive,
   type ArchiveDependencies,
 } from "../../workspace-archive-service.js";
-import { createAgentCommand } from "../create-agent/create.js";
+import { createAgentCommand, resolveChildAgentCwd } from "../create-agent/create.js";
 import type { VoiceCallerContext, VoiceSpeakHandler } from "../../voice-types.js";
 import type { FirstAgentContext } from "../../messages.js";
 import { everyMsToFiveFieldCron } from "@getpaseo/protocol/schedule/cadence";
-import { expandUserPath, isSameOrDescendantPath, resolvePathFromBase } from "../../path-utils.js";
+import { expandUserPath, isSameOrDescendantPath } from "../../path-utils.js";
 import type { TerminalManager } from "../../../terminal/terminal-manager.js";
 import { encodeTerminalKeyInput } from "@getpaseo/protocol/terminal-key-input";
 import { TerminalInputModeTracker } from "@getpaseo/protocol/terminal-input-mode";
@@ -539,25 +539,6 @@ function buildScheduleUpdateInput(input: ScheduleUpdateToolInput): UpdateSchedul
     ...(expiresAt !== undefined ? { expiresAt } : {}),
     ...(Object.keys(newAgentConfig).length > 0 ? { newAgentConfig } : {}),
   };
-}
-
-function resolveChildAgentCwd(params: {
-  parentCwd: string;
-  requestedCwd?: string;
-  lockedCwd?: string;
-  allowCustomCwd: boolean;
-}): string {
-  const lockedCwd = params.lockedCwd?.trim();
-  if (lockedCwd) {
-    return expandUserPath(lockedCwd);
-  }
-
-  const requestedCwd = params.requestedCwd?.trim();
-  if (!requestedCwd || !params.allowCustomCwd) {
-    return params.parentCwd;
-  }
-
-  return resolvePathFromBase(params.parentCwd, requestedCwd);
 }
 
 const TerminalSummarySchema = z.object({

@@ -1779,6 +1779,55 @@ describe("create_agent MCP tool", () => {
     );
   });
 
+  it("rejects an existing workspace the caller context may not start children in", async () => {
+    const callerCwd = await mkdtemp(join(tmpdir(), "paseo-restricted-caller-"));
+    const { agentManager, agentStorage, spies } = createTestDeps();
+    spies.agentManager.getAgent.mockReturnValue({
+      id: "restricted-agent",
+      config: {},
+      cwd: callerCwd,
+      workspaceId: "wks_caller",
+      provider: "codex",
+      currentModeId: "full-access",
+    } as ManagedAgent);
+    spies.agentManager.createAgent.mockResolvedValue({
+      id: "existing-workspace-agent",
+      cwd: callerCwd,
+      workspaceId: "wks_existing",
+      lifecycle: "idle",
+      currentModeId: null,
+      availableModes: [],
+      config: { title: "Existing workspace" },
+    } as ManagedAgent);
+    try {
+      const server = await createAgentMcpServer({
+        agentManager,
+        agentStorage,
+        providerSnapshotManager: createOpenCodeManager().manager,
+        callerAgentId: "restricted-agent",
+        resolveCallerContext: () => ({ allowCustomCwd: false }),
+        listActiveWorkspaces: async () => [
+          { workspaceId: "wks_existing", cwd: existingCwd, kind: "worktree" },
+        ],
+        logger,
+      });
+      const tool = registeredTool(server, "create_agent");
+
+      await expect(
+        tool.handler({
+          ...detachedExistingWorkspace("wks_existing"),
+          relationship: { kind: "subagent" },
+          title: "Existing workspace",
+          provider: "codex/gpt-5.4",
+          initialPrompt: "Do work",
+        }),
+      ).rejects.toThrow(`cwd ${existingCwd} is not allowed for this caller`);
+      expect(spies.agentManager.createAgent).not.toHaveBeenCalled();
+    } finally {
+      await rm(callerCwd, { recursive: true, force: true });
+    }
+  });
+
   it("accepts provider features and passes them through createAgent", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.createAgent.mockResolvedValue({

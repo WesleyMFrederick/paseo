@@ -1,5 +1,5 @@
 import { Readable } from "node:stream";
-import type { VoiceSpeakHandler } from "../../voice-types.js";
+import type { VoiceCallerContext, VoiceSpeakHandler } from "../../voice-types.js";
 import { EventEmitter } from "node:events";
 import pino from "pino";
 import { describe, expect, test, vi } from "vitest";
@@ -134,6 +134,46 @@ async function settle(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
 }
+
+describe("VoiceSession caller context", () => {
+  test("drops the voice caller context before the disable reload rebuilds the agent tools", async () => {
+    const contexts = new Map<string, VoiceCallerContext>();
+    const reloadContexts: boolean[] = [];
+    const host = createFakeHost();
+    host.reloadAgentSession = async (agentId) => {
+      reloadContexts.push(contexts.has(agentId));
+      return { id: agentId } as unknown as ManagedAgent;
+    };
+    const voiceSession = new VoiceSession({
+      host,
+      logger: pino({ level: "silent" }),
+      sessionId: "voice-session-test",
+      sttLanguage: "en",
+      tts: null,
+      voiceBridge: {
+        registerVoiceCallerContext: (agentId, context) => {
+          contexts.set(agentId, context);
+        },
+        unregisterVoiceCallerContext: (agentId) => {
+          contexts.delete(agentId);
+        },
+      },
+      stt: { id: "local", createSession: () => new FakeVoiceSttSession() },
+      voice: {
+        turnDetection: { id: "local", createSession: () => new FakeVoiceTurnDetectionSession() },
+      },
+    });
+    try {
+      await voiceSession.handleSetVoiceMode(true, VOICE_AGENT_ID);
+      await voiceSession.handleSetVoiceMode(false);
+
+      expect(reloadContexts).toEqual([true, false]);
+      expect(contexts.size).toBe(0);
+    } finally {
+      await voiceSession.cleanup();
+    }
+  });
+});
 
 describe("VoiceSession streaming transcription", () => {
   test("interrupts playback and the agent on speech detection without partial transcripts", async () => {

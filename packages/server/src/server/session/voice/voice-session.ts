@@ -536,6 +536,9 @@ export class VoiceSession {
       return;
     }
 
+    this.unregisterVoiceSpeakHandler?.(agentId);
+    this.unregisterVoiceCallerContext?.(agentId);
+
     if (restoreAgentConfig && this.voiceModeBaseConfig) {
       const baseConfig = this.voiceModeBaseConfig;
       try {
@@ -550,8 +553,6 @@ export class VoiceSession {
       }
     }
 
-    this.unregisterVoiceSpeakHandler?.(agentId);
-    this.unregisterVoiceCallerContext?.(agentId);
     this.voiceModeBaseConfig = null;
     this.voiceModeAgentId = null;
   }
