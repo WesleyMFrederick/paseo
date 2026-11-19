@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer } from "react";
 import {
   createMermaidRenderModel,
+  getMermaidRenderFailure,
   getMermaidRenderRequest,
   reduceMermaidRenderModel,
   type DiagramColorScheme,
@@ -83,13 +84,14 @@ export function useMermaidRenderModel({
     },
     [],
   );
-  const renderFailed = useCallback((revision: number) => {
-    dispatch({ type: "renderFailed", revision });
+  const renderFailed = useCallback((failure: { revision: number; line: number | null }) => {
+    dispatch({ type: "renderFailed", revision: failure.revision, line: failure.line });
   }, []);
 
   return {
     state,
     request: getMermaidRenderRequest(state),
+    failure: getMermaidRenderFailure(state),
     rendered,
     renderFailed,
   };

@@ -283,6 +283,8 @@ export const ru: TranslationResources = {
       resetZoom: "Сбросить вид",
       viewSource: "Показать код",
       viewDiagram: "Показать диаграмму",
+      renderFailed: "Невозможно построить диаграмму",
+      renderFailedAtLine: "Невозможно построить диаграмму (строка {{line}})",
     },
     actions: {
       copyCode: "Скопировать код",

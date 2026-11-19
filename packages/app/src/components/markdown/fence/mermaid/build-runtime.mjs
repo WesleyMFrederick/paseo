@@ -17,19 +17,12 @@ const result = await esbuild.build({
   platform: "browser",
   target: ["ios15", "chrome100"],
   minify: true,
-  // The app's deployment floor is iOS 15.1 but structuredClone (used by
-  // mermaid) only exists from iOS 15.4; esbuild targets transform syntax,
-  // not runtime APIs. Mermaid only clones plain config objects, so a
-  // JSON-based fallback is sufficient.
-  banner: {
-    js: 'if(typeof globalThis.structuredClone!=="function"){globalThis.structuredClone=function(v){return v===undefined?v:JSON.parse(JSON.stringify(v));};}',
-  },
   logLevel: "info",
 });
 
 const rawJs = result.outputFiles[0]?.text;
 if (!rawJs) {
-  throw new Error("Mermaid runtime bundle produced no JavaScript");
+  throw new Error("Diagram runtime bundle produced no JavaScript");
 }
 // JSON.stringify below escapes the TypeScript representation, not the runtime
 // HTML — an embedded closing-script sequence would still terminate the inline
@@ -57,6 +50,13 @@ const html = `<!doctype html>
       }
       #diagram svg {
         display: block;
+      }
+      /* Pele draws subgraph title halos with color-mix(), which iOS Safari
+         added in 16.2. Older WebKit drops the stroke and edges cross the title. */
+      @supports not (color: color-mix(in srgb, red, red)) {
+        .pele-cluster-title > text[fill="none"] {
+          stroke: var(--_bg);
+        }
       }
     </style>
   </head>

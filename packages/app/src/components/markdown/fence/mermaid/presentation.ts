@@ -12,3 +12,16 @@ export function getDiagramBoxStyle(style: TextStyle): ViewStyle {
     padding: style.padding,
   };
 }
+
+// Moves the fence's vertical margins onto a wrapper so content placed under the
+// code block sits inside the same gap.
+export function splitFenceMargins(style: TextStyle): { margins: ViewStyle; text: TextStyle } {
+  const { marginTop, marginBottom, marginVertical, ...text } = style;
+  return {
+    margins: {
+      marginTop: marginTop ?? marginVertical,
+      marginBottom: marginBottom ?? marginVertical,
+    },
+    text,
+  };
+}

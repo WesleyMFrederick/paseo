@@ -284,6 +284,8 @@ export const es: TranslationResources = {
       resetZoom: "Restablecer vista",
       viewSource: "Ver fuente",
       viewDiagram: "Ver diagrama",
+      renderFailed: "No se puede dibujar el diagrama",
+      renderFailedAtLine: "No se puede dibujar el diagrama (línea {{line}})",
     },
     actions: {
       copyCode: "Copiar código",

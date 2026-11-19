@@ -284,6 +284,8 @@ export const ptBR: TranslationResources = {
       resetZoom: "Redefinir visualização",
       viewSource: "Ver fonte",
       viewDiagram: "Ver diagrama",
+      renderFailed: "Não foi possível desenhar o diagrama",
+      renderFailedAtLine: "Não foi possível desenhar o diagrama (linha {{line}})",
     },
     actions: {
       copyCode: "Copiar código",

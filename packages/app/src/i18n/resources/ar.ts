@@ -281,6 +281,8 @@ export const ar: TranslationResources = {
       resetZoom: "إعادة تعيين العرض",
       viewSource: "عرض المصدر",
       viewDiagram: "عرض المخطط",
+      renderFailed: "غير قادر على رسم المخطط",
+      renderFailedAtLine: "غير قادر على رسم المخطط (السطر {{line}})",
     },
     actions: {
       copyCode: "نسخ الرمز",

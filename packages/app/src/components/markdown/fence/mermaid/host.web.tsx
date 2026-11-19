@@ -6,7 +6,7 @@ import React, {
   useState,
   type ComponentType,
 } from "react";
-import { Pressable, View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
+import { Pressable, View, type StyleProp, type ViewStyle } from "react-native";
 import { useTranslation } from "react-i18next";
 import { Code, Scan, Workflow, ZoomIn, ZoomOut } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -19,7 +19,8 @@ import { mermaidRuntimeHtml } from "./runtime/html.gen";
 import { parseMermaidRuntimeMessage, type MermaidRuntimeRenderMessage } from "./runtime/messages";
 import { MermaidRuntimeRequestDriver } from "./runtime/request-driver";
 import { useMermaidRenderModel } from "./use-render-model";
-import { getDiagramBoxStyle } from "./presentation";
+import { DiagramFailureNote } from "./failure-note";
+import { getDiagramBoxStyle, splitFenceMargins } from "./presentation";
 
 interface MermaidFenceHostImplProps extends MarkdownFenceRendererProps {
   colorScheme?: "light" | "dark";
@@ -35,7 +36,7 @@ interface MermaidIframeRuntimeProps {
     height: number;
     width: number;
   }) => void;
-  onRenderFailed: (revision: number) => void;
+  onRenderFailed: (failure: { revision: number; line: number | null }) => void;
 }
 
 function MermaidIframeRuntime({
@@ -92,7 +93,7 @@ function MermaidIframeRuntime({
         return;
       }
       if (message.type === "renderError") {
-        onRenderFailed(message.revision);
+        onRenderFailed(message);
         sendRequest(driverRef.current?.settled(message.revision, false) ?? null);
         return;
       }
@@ -127,7 +128,7 @@ function MermaidFenceHostImpl({
   colorScheme = "dark",
 }: MermaidFenceHostImplProps) {
   const { t } = useTranslation();
-  const { state, request, rendered, renderFailed } = useMermaidRenderModel({
+  const { state, request, failure, rendered, renderFailed } = useMermaidRenderModel({
     source: code,
     phase,
     colorScheme,
@@ -300,12 +301,7 @@ function MermaidFenceHostImpl({
   }, [applyTransformToElement, showSource]);
 
   const sourceView = useMemo(() => {
-    const { marginTop, marginBottom, marginVertical, ...sourceTextStyle } = textStyle;
-    const margins: ViewStyle = {
-      marginTop: marginTop ?? marginVertical,
-      marginBottom: marginBottom ?? marginVertical,
-    };
-    const text: TextStyle = sourceTextStyle;
+    const { margins, text } = splitFenceMargins(textStyle);
     return {
       container: [margins, sourceContainerStyle],
       text,
@@ -315,13 +311,9 @@ function MermaidFenceHostImpl({
 
   const diagramVisible = canShowDiagram && !showSource;
   const sourceVisible = !canShowDiagram || showSource;
-  let rootStyle: StyleProp<ViewStyle> = sourceContainerStyle;
-  if (diagramVisible) {
-    rootStyle = [diagramBoxStyle, containerStyle];
-  } else if (showSource) {
-    rootStyle = sourceView.container;
-  }
-  const sourceTextStyle = showSource ? sourceView.text : textStyle;
+  const rootStyle: StyleProp<ViewStyle> = diagramVisible
+    ? [diagramBoxStyle, containerStyle]
+    : sourceView.container;
 
   const runtime = (
     <MermaidIframeRuntime
@@ -345,9 +337,10 @@ function MermaidFenceHostImpl({
           code={code}
           language="mermaid"
           inheritedStyles={inheritedStyles}
-          textStyle={sourceTextStyle}
+          textStyle={sourceView.text}
         />
       ) : null}
+      {failure ? <DiagramFailureNote failure={failure} /> : null}
       <div
         ref={viewportRef}
         role={diagramVisible ? "img" : undefined}

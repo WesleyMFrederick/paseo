@@ -285,6 +285,8 @@ export const fr: TranslationResources = {
       resetZoom: "Réinitialiser la vue",
       viewSource: "Afficher la source",
       viewDiagram: "Afficher le diagramme",
+      renderFailed: "Impossible de dessiner le diagramme",
+      renderFailedAtLine: "Impossible de dessiner le diagramme (ligne {{line}})",
     },
     actions: {
       copyCode: "Copier le code",
