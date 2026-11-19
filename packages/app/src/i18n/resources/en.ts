@@ -280,6 +280,8 @@ export const en = {
       resetZoom: "Reset view",
       viewSource: "View source",
       viewDiagram: "View diagram",
+      renderFailed: "Unable to draw diagram",
+      renderFailedAtLine: "Unable to draw diagram (line {{line}})",
     },
     actions: {
       copyCode: "Copy code",

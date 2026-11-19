@@ -6,7 +6,7 @@ Work item W381. Replace the `mermaid` npm package with [Pele](https://github.com
 
 The app renders diagrams in one bundled runtime page. `build-runtime.mjs` bundles `runtime/entry.ts` into `runtime/html.gen.ts`. Web loads that page in a sandboxed iframe (`host.web.tsx`), and native loads it in a WebView (`host.native.tsx`). Both hosts talk to it through the same messages (`render`, `rendered`, `renderError`, `bridgeReady`). `entry.ts` is the only file that imports `mermaid`.
 
-Swap Pele in at `entry.ts` and leave both hosts, the message protocol, the render model, and the request driver unchanged. One change covers web and native, and the security boundary stays the same: sandboxed iframe, WebView navigation block, and a `default-src 'none'` content policy.
+Swap Pele in at `entry.ts` and leave both hosts, the message protocol, the render model, and the request driver unchanged. One change covers web and native, and the security boundary stays the same: sandboxed iframe, WebView navigation block, and a `default-src 'none'` content policy. The error note (see [Errors](#Errors)) is the only later change that reaches past `entry.ts`.
 
 Considered and not taken:
 
@@ -55,9 +55,18 @@ The theme is fixed per color scheme, as before. Mermaid's `dark` and `default` t
 
 ## Errors
 
-`render()` throws `PeleError` with a `code` (`unsupported-diagram`, `syntax`, `semantic`, `limit`), a `line`, a `column` and a message. The runtime catches every error and sends `renderError`, as it does today. The render model then keeps the last good preview while the message streams, and shows the highlighted source block once the message is complete (`render-model.ts:122`).
+`render()` throws `PeleError` with a `code` (`unsupported-diagram`, `syntax`, `semantic`, `limit`), a `line`, a `column` and a message. The runtime catches every error and sends `renderError` with Pele's `line`, or `null` when Pele reports line 0. The render model keeps the last good preview while the message streams. Once the message is complete, it shows the highlighted source block with a short note under it: "Unable to draw diagram (line 3)", or "Unable to draw diagram" when there is no line. A source that `source-policy.ts` rejects gets the note without a line.
 
-Today the user sees no reason a diagram failed. Whether to show Pele's error line under the source block is a USER decision, tracked as an open ask (see [Open decision](#Open%20decision)).
+The note is translated and uses only `line`. Pele's full message is English parser output with grammar token names, so the app doesn't show it. While the message streams there is no note, because partial sources fail all the time. The USER chose this over showing no reason (ask A2).
+
+What Pele 1.13.0 throws for sample invalid sources:
+
+| Source                         | `code`                | `line`:`column` | First line of `message`                                                                   |
+| ------------------------------ | --------------------- | --------------- | ----------------------------------------------------------------------------------------- |
+| `flowchart TD` / `A --> `      | `syntax`              | 2:8             | `Parse error on line 2:` then the line, a caret, and `Expecting 'NODE_STRING', got 'EOF'` |
+| `sequenceDiagram` / `Alice->>` | `syntax`              | 2:11            | `Parse error on line 2:` then `Expecting 'ACTOR', got 'NEWLINE'`                          |
+| `pie` / `"a" : x`              | `syntax`              | 2:9             | `Lexical error on line 2. Unrecognized text.`                                             |
+| `notadiagram` / `foo`          | `unsupported-diagram` | 0:0             | `No diagram type detected for the given text.`                                            |
 
 ## Security
 
@@ -76,28 +85,13 @@ Pele draws the halo behind a subgraph title with `color-mix()`, which arrived in
 
 | Artifact                                                        | Before (Mermaid 11.16) | After (Pele 1.13)             |
 | --------------------------------------------------------------- | ---------------------- | ----------------------------- |
-| `runtime/html.gen.ts`, shipped in the web and native JS bundles | 3,578,201 bytes        | 739,764 bytes (about a fifth) |
+| `runtime/html.gen.ts`, shipped in the web and native JS bundles | 3,578,201 bytes        | 739,818 bytes (about a fifth) |
 
 ## Units
 
 Each unit runs test-writer, then implementer, then reviewer.
 
 1. **Core swap.** `entry.ts` calls Pele `render()` with the options above and sets the scheme palette. Pele renders synchronously, so the runtime's queue drops its in-flight guard and stale-result check: every message that arrives before the scheduled drain coalesces into the newest one. `build-runtime.mjs` drops the banner. `packages/app/package.json` and `package-lock.json` replace `mermaid` with `pele`. Regenerate `html.gen.ts`. Tests in `runtime.browser.test.ts`: the dark and light schemes produce light and dark label text, and the output for a diagram with a `click` link and an image shape contains no `<a>` or `<image>`. The existing streaming, invalid and coalescing tests still pass.
-2. **Error display.** Depends on the open decision.
-3. **Verification on web.** Run the app on web. Take screenshots of a Mermaid fence in chat, in the Markdown file preview, and with an invalid diagram. Save them in `evidence/sources/`. Run `npm run typecheck`, `npm run lint`, the fence unit tests, the runtime browser tests, and `e2e/browser/mermaid-streaming.spec.ts`.
+2. **Error display.** `renderError` carries the failing `line`. The render model stores it and reports a failure only for a complete message. A completed failed or rejected diagram drops its last streaming preview, even when completion leaves the source unchanged. Both hosts render `DiagramFailureNote` (`failure-note.tsx`) under the source block, with the fence's vertical margins moved onto a wrapper so the note sits inside the fence's gap. The note carries the selection-copy ignore marker, so copying the message leaves it out. Strings `message.diagram.renderFailed` and `renderFailedAtLine` in all nine locales. Tests: `render-model.test.ts` (line reported only once complete, rejected source has no line, a rejected streaming preview clears on completion), `runtime.browser.test.ts` (a broken flowchart reports line 2), and `e2e/browser/mermaid-render-failure.spec.ts` (a streamed broken flowchart shows "Unable to draw diagram (line 3)", no diagram, and copying the message leaves the note out).
+3. **Verification on web.** Run the app on web. Take screenshots of a Mermaid fence in chat, in the Markdown file preview, and with an invalid diagram. Save them in `evidence/sources/`. Run `npm run typecheck`, `npm run lint`, the fence unit tests, the runtime browser tests, `e2e/browser/mermaid-streaming.spec.ts` and `e2e/browser/mermaid-render-failure.spec.ts`.
 4. **Land.** Use the `merge` skill: commit, `git fetch fork && git merge fork/dev`, push the branch to `fork`, and open a PR against `dev`.
-
-## Open decision
-
-Should an invalid diagram show why it failed under the source block after the message completes? The choice is parked as a USER ask. Unit 1 doesn't depend on it.
-
-What Pele 1.13.0 throws for sample invalid sources (`/tmp/pele-inspect/errs.mjs`):
-
-| Source                         | `code`                | `line`:`column` | First line of `message`                                                                   |
-| ------------------------------ | --------------------- | --------------- | ----------------------------------------------------------------------------------------- |
-| `flowchart TD` / `A --> `      | `syntax`              | 2:8             | `Parse error on line 2:` then the line, a caret, and `Expecting 'NODE_STRING', got 'EOF'` |
-| `sequenceDiagram` / `Alice->>` | `syntax`              | 2:11            | `Parse error on line 2:` then `Expecting 'ACTOR', got 'NEWLINE'`                          |
-| `pie` / `"a" : x`              | `syntax`              | 2:9             | `Lexical error on line 2. Unrecognized text.`                                             |
-| `notadiagram` / `foo`          | `unsupported-diagram` | 0:0             | `No diagram type detected for the given text.`                                            |
-
-The full message is English parser output with grammar token names. The `code`, `line` and `column` fields are enough to build a short translated note.

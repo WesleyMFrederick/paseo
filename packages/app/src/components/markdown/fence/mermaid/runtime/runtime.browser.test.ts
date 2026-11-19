@@ -128,8 +128,16 @@ describe("Mermaid sandbox runtime", () => {
     const second = await render(frame, { revision: 3, source: secondSource });
 
     expect(first).toMatchObject({ type: "rendered", revision: 1, source: firstSource });
-    expect(invalid).toEqual({ type: "renderError", revision: 2 });
+    expect(invalid).toEqual({ type: "renderError", revision: 2, line: null });
     expect(second).toMatchObject({ type: "rendered", revision: 3, source: secondSource });
+  });
+
+  it("reports the source line a diagram failed on", async () => {
+    const frame = await mountRuntime();
+
+    const failed = await render(frame, { revision: 1, source: "flowchart TD\nA --> " });
+
+    expect(failed).toEqual({ type: "renderError", revision: 1, line: 2 });
   });
 
   it("coalesces queued input and never reports an obsolete result", async () => {

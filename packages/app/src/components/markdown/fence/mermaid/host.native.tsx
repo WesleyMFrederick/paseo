@@ -24,7 +24,8 @@ import {
 } from "./runtime/messages";
 import { MermaidRuntimeRequestDriver } from "./runtime/request-driver";
 import { useMermaidRenderModel } from "./use-render-model";
-import { getDiagramBoxStyle } from "./presentation";
+import { DiagramFailureNote } from "./failure-note";
+import { getDiagramBoxStyle, splitFenceMargins } from "./presentation";
 
 interface MermaidFenceHostImplProps extends MarkdownFenceRendererProps {
   colorScheme?: "light" | "dark";
@@ -44,7 +45,7 @@ interface MermaidWebViewProps {
     height: number;
     width: number;
   }) => void;
-  onRenderFailed: (revision: number) => void;
+  onRenderFailed: (failure: { revision: number; line: number | null }) => void;
   style?: ViewStyle;
 }
 
@@ -100,7 +101,7 @@ function MermaidWebView({
         return;
       }
       if (message.type === "renderError") {
-        onRenderFailed(message.revision);
+        onRenderFailed(message);
         sendRequest(driverRef.current?.settled(message.revision, false) ?? null);
         return;
       }
@@ -278,7 +279,7 @@ function MermaidFenceHostImpl({
   colorScheme = "dark",
 }: MermaidFenceHostImplProps) {
   const { t } = useTranslation();
-  const { state, request, rendered, renderFailed } = useMermaidRenderModel({
+  const { state, request, failure, rendered, renderFailed } = useMermaidRenderModel({
     source: code,
     phase,
     colorScheme,
@@ -315,16 +316,20 @@ function MermaidFenceHostImpl({
     [canShowDiagram, visible],
   );
   const diagramBoxStyle = getDiagramBoxStyle(textStyle);
+  const sourceView = useMemo(() => splitFenceMargins(textStyle), [textStyle]);
 
   return (
     <>
       {!canShowDiagram ? (
-        <HighlightedCodeBlock
-          code={code}
-          language="mermaid"
-          inheritedStyles={inheritedStyles}
-          textStyle={textStyle}
-        />
+        <View style={sourceView.margins}>
+          <HighlightedCodeBlock
+            code={code}
+            language="mermaid"
+            inheritedStyles={inheritedStyles}
+            textStyle={sourceView.text}
+          />
+          {failure ? <DiagramFailureNote failure={failure} /> : null}
+        </View>
       ) : null}
       <Pressable
         onPress={openViewer}

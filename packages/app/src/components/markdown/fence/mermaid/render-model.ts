@@ -32,7 +32,13 @@ export interface MermaidRenderModel {
   phase: MarkdownPhase;
   colorScheme: DiagramColorScheme;
   status: "pending" | "rendered" | "failed" | "rejected";
+  // Source line Pele reported for the failed render; null when it gave none.
+  failedLine: number | null;
   visible: RenderedDiagram | null;
+}
+
+export interface MermaidRenderFailure {
+  line: number | null;
 }
 
 export type MermaidRenderAction =
@@ -44,7 +50,7 @@ export type MermaidRenderAction =
       colorScheme: DiagramColorScheme;
       dimensions: DiagramDimensions;
     }
-  | { type: "renderFailed"; revision: number };
+  | { type: "renderFailed"; revision: number; line: number | null };
 
 function reduceRendered(
   state: MermaidRenderModel,
@@ -91,6 +97,7 @@ export function createMermaidRenderModel(input: MermaidRenderInput): MermaidRend
       phase: input.phase,
       colorScheme: input.colorScheme,
       status: "rejected",
+      failedLine: null,
       visible: input.phase === "complete" ? null : input.cached,
     };
   }
@@ -100,6 +107,7 @@ export function createMermaidRenderModel(input: MermaidRenderInput): MermaidRend
     phase: input.phase,
     colorScheme: input.colorScheme,
     status: "pending",
+    failedLine: null,
     visible: input.cached,
   };
 }
@@ -119,6 +127,7 @@ export function reduceMermaidRenderModel(
     return {
       ...state,
       status: "failed",
+      failedLine: action.line,
       visible: state.phase === "complete" ? null : state.visible,
     };
   }
@@ -129,7 +138,8 @@ export function reduceMermaidRenderModel(
     if (input.phase === state.phase) {
       return state;
     }
-    const finalFailure = input.phase === "complete" && state.status === "failed";
+    const finalFailure =
+      input.phase === "complete" && (state.status === "failed" || state.status === "rejected");
     return {
       ...state,
       phase: input.phase,
@@ -144,6 +154,7 @@ export function reduceMermaidRenderModel(
       phase: input.phase,
       colorScheme: input.colorScheme,
       status: "rejected",
+      failedLine: null,
       visible: input.phase === "complete" ? null : (input.cached ?? state.visible),
     };
   }
@@ -154,6 +165,7 @@ export function reduceMermaidRenderModel(
     phase: input.phase,
     colorScheme: input.colorScheme,
     status: "pending",
+    failedLine: null,
     visible: input.cached ?? state.visible,
   };
 }
@@ -167,4 +179,19 @@ export function getMermaidRenderRequest(state: MermaidRenderModel): MermaidRende
     source: state.source,
     colorScheme: state.colorScheme,
   };
+}
+
+// Streaming sources fail mid-token all the time, so a failure only counts once
+// the message is complete.
+export function getMermaidRenderFailure(state: MermaidRenderModel): MermaidRenderFailure | null {
+  if (state.phase !== "complete") {
+    return null;
+  }
+  if (state.status === "failed") {
+    return { line: state.failedLine };
+  }
+  if (state.status === "rejected") {
+    return { line: null };
+  }
+  return null;
 }

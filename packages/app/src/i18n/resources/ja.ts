@@ -284,6 +284,8 @@ export const ja: TranslationResources = {
       resetZoom: "表示をリセット",
       viewSource: "ソースを表示",
       viewDiagram: "図を表示",
+      renderFailed: "図を描画できません",
+      renderFailedAtLine: "図を描画できません（{{line}} 行）",
     },
     actions: {
       copyCode: "コードをコピー",

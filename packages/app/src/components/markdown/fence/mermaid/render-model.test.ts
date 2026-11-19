@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createMermaidRenderModel,
+  getMermaidRenderFailure,
   getMermaidRenderRequest,
   reduceMermaidRenderModel,
   type MermaidRenderInput,
@@ -50,6 +51,7 @@ describe("Mermaid render model", () => {
     const failed = reduceMermaidRenderModel(pending, {
       type: "renderFailed",
       revision: pending.revision,
+      line: 2,
     });
 
     expect(failed.status).toBe("failed");
@@ -65,6 +67,7 @@ describe("Mermaid render model", () => {
     const failed = reduceMermaidRenderModel(pending, {
       type: "renderFailed",
       revision: pending.revision,
+      line: 2,
     });
     const complete = reduceMermaidRenderModel(failed, {
       type: "inputChanged",
@@ -88,6 +91,7 @@ describe("Mermaid render model", () => {
     const failed = reduceMermaidRenderModel(completePending, {
       type: "renderFailed",
       revision: completePending.revision,
+      line: 2,
     });
 
     expect(failed.visible).toBeNull();
@@ -159,5 +163,49 @@ describe("Mermaid render model", () => {
 
     expect(rejected.status).toBe("rejected");
     expect(rejected.visible).toBeNull();
+  });
+
+  it("clears the last preview when a rejected streaming revision completes unchanged", () => {
+    const rejectedSource = 'flowchart TD\nA@{ img: "https://example.com/x" }';
+    const rendered = renderCurrent(createMermaidRenderModel(input()));
+    const rejected = reduceMermaidRenderModel(rendered, {
+      type: "inputChanged",
+      input: input({ source: rejectedSource, rejected: true }),
+    });
+    const complete = reduceMermaidRenderModel(rejected, {
+      type: "inputChanged",
+      input: input({ source: rejectedSource, phase: "complete", rejected: true }),
+    });
+
+    expect(complete.visible).toBeNull();
+    expect(getMermaidRenderFailure(complete)).toEqual({ line: null });
+  });
+
+  it("reports the failing line only once the message is complete", () => {
+    const pending = createMermaidRenderModel(input({ source: "flowchart TD\nA --> " }));
+    const failed = reduceMermaidRenderModel(pending, {
+      type: "renderFailed",
+      revision: pending.revision,
+      line: 2,
+    });
+    const complete = reduceMermaidRenderModel(failed, {
+      type: "inputChanged",
+      input: input({ source: "flowchart TD\nA --> ", phase: "complete" }),
+    });
+
+    expect(getMermaidRenderFailure(failed)).toBeNull();
+    expect(getMermaidRenderFailure(complete)).toEqual({ line: 2 });
+  });
+
+  it("reports a rejected final diagram without a line", () => {
+    const rejected = createMermaidRenderModel(
+      input({
+        source: 'flowchart TD\nA@{ img: "https://example.com/x" }',
+        phase: "complete",
+        rejected: true,
+      }),
+    );
+
+    expect(getMermaidRenderFailure(rejected)).toEqual({ line: null });
   });
 });

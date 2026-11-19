@@ -1,4 +1,4 @@
-import { render as renderDiagram } from "pele";
+import { PeleError, render as renderDiagram } from "pele";
 import {
   parseMermaidRuntimeRenderMessage,
   type MermaidRuntimeMessage,
@@ -122,8 +122,10 @@ function render(message: MermaidRuntimeRenderMessage): void {
       height: Math.ceil(rect?.height ?? host.scrollHeight),
       width: Math.ceil(rect?.width ?? host.scrollWidth),
     });
-  } catch {
-    sendToHost({ type: "renderError", revision: message.revision });
+  } catch (error) {
+    // Pele reports line 0 when it can't place the error, such as an unknown diagram type.
+    const line = error instanceof PeleError && error.line > 0 ? error.line : null;
+    sendToHost({ type: "renderError", revision: message.revision, line });
   }
 }
 
